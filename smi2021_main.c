@@ -327,7 +327,7 @@ static int smi2021_initialize(struct smi2021 *smi2021)
 	return 0;
 }
 
-//#define _EVERY_X_FRAMES	20
+#define _EVERY_X_FRAMES	20
 #ifdef _EVERY_X_FRAMES
 static unsigned debugCount=_EVERY_X_FRAMES;
 #endif
@@ -368,8 +368,6 @@ static void smi2021_buf_done(struct smi2021 *smi2021)
 {
 	struct smi2021_buf *buf = smi2021->cur_buf;
 
-	//dev_info(smi2021->dev, "smi2021_buf_done\n");
-
 	v4l2_get_timestamp(&buf->vb.v4l2_buf.timestamp);
 	buf->vb.v4l2_buf.sequence = smi2021->sequence++;
 	buf->vb.v4l2_buf.field = V4L2_FIELD_INTERLACED;
@@ -393,106 +391,7 @@ static void smi2021_buf_done(struct smi2021 *smi2021)
 	smi2021->cur_buf = NULL;
 }
 
-#define is_sav(trc)						\
-	((trc & SMI2021_TRC_EAV) == 0x00)
 
-#define is_field2(trc)						\
-	((trc & SMI2021_TRC_FIELD_2) == SMI2021_TRC_FIELD_2)
-#define is_active_video(trc)					\
-	((trc & SMI2021_TRC_VBI) == 0x00)
-/*
- * Parse the TRC.
- * Grab a new buffer from the queue if don't have one
- * and we are recieving the start of a video frame.
- *
- * Mark video buffers as done if we have one full frame.
- */
-
-#ifndef _ADAPTED_FROM_USESPACE_CODE
-
-static void parse_trc(struct smi2021 *smi2021, u8 trc)
-{
-
-	struct smi2021_buf *buf = smi2021->cur_buf;
-	int lines_per_field = smi2021->cur_height / 2;
-	int line = 0;
-
-	dev_info(smi2021->dev, "parse_trc ...");
-
-	if (buf == NULL) 
-	{
-		// is start of video?
-		if (!is_sav(trc))
-		{
-			dev_info(smi2021->dev, "!is_sav (%02x)\n", trc);
-			return;
-		}
-
-		if (!is_active_video(trc))
-		{
-			dev_info(smi2021->dev, "!is_active_video\n");
-			return;
-		}
-
-		if (is_field2(trc))
-		{
-			dev_info(smi2021->dev, "is_field2\n");
-			return;
-		}
-
-		buf = smi2021_get_buf(smi2021);
-		if (buf == NULL)
-		{
-			dev_info(smi2021->dev, "smi2021_get_buf failed\n");
-			return;
-		}
-
-		smi2021->cur_buf = buf;
-	}
-
-	if (is_sav(trc)) {
-		/* Start of VBI or ACTIVE VIDEO */
-		if (is_active_video(trc)) {
-			buf->in_blank = false;
-			buf->trc_av++;
-		} else {
-			/* VBI */
-			buf->in_blank = true;
-		}
-
-		if (!buf->second_field && is_field2(trc)) {
-			line = buf->pos / SMI2021_BYTES_PER_LINE;
-			if (line < lines_per_field)
-				goto buf_done;
-
-			buf->second_field = true;
-			buf->trc_av = 0;
-		}
-
-		if (buf->second_field && !is_field2(trc))
-			goto buf_done;
-	} else {
-		/* End of VBI or ACTIVE VIDEO */
-		buf->in_blank = true;
-	}
-
-	return;
-
-buf_done:
-	smi2021_buf_done(smi2021);
-}
-
-#endif
-
-/*
-
-fld0Line0
-fld1Line0
-fld0Line1
-fld1Line1
-
-
-*/
 
 #define BYTES_OF_UYUV_DATA_EXPECTED	1440
 
@@ -520,9 +419,6 @@ static int blitVideoToBuffer(struct smi2021 *smi2021, u8 *sourceBuffer, u8 *endB
 			lineOfOutput=(smi2021->parseVideoStateMachine.active_line_count.field1*2)+1;
 		}
 
-		// remove me
-		//lineOfOutput=(smi2021->parseVideoStateMachine.active_line_count);
-
 
 		// work that into a line's buffer address
 		offset=lineOfOutput*BYTES_OF_UYUV_DATA_EXPECTED;
@@ -547,74 +443,6 @@ static void finishFrameBlit(struct smi2021 *smi2021)
 		smi2021_buf_done(smi2021);
 }
 
-#ifndef _ADAPTED_FROM_USESPACE_CODE
-
-static void copy_video(struct smi2021 *smi2021, u8 p)
-{
-
-
-	struct smi2021_buf *buf = smi2021->cur_buf;
-
-	int lines_per_field = smi2021->cur_height / 2;
-	int line = 0;
-	int pos_in_line = 0;
-	unsigned int offset = 0;
-	u8 *dst;
-
-	if (buf == NULL)
-	{
-		//dev_info(smi2021->dev, "buf == NULL\n");
-		return;
-	}
-
-	dev_info(smi2021->dev, "copy_video ... ");
-
-	if (buf->in_blank)
-	{
-		dev_info(smi2021->dev, "in_blank\n");
-		return;
-	}
-
-	if (buf->pos >= buf->length) 
-	{
-		smi2021_buf_done(smi2021);
-		return;
-	}
-
-	pos_in_line = buf->pos % SMI2021_BYTES_PER_LINE;
-	line = buf->pos / SMI2021_BYTES_PER_LINE;
-	if (line >= lines_per_field)
-			line -= lines_per_field;
-
-	if (line != buf->trc_av - 1) {
-		/* Keep video synchronized.
-		 * The device will sometimes give us too many bytes
-		 * for a line, before we get a new TRC.
-		 * We just drop these bytes */
-
-		dev_info(smi2021->dev, "dropped\n");
-
-		return;
-	}
-
-	if (buf->second_field)
-		offset += SMI2021_BYTES_PER_LINE;
-
-	offset += (SMI2021_BYTES_PER_LINE * line * 2) + pos_in_line;
-
-	/* Will this ever happen? */
-	if (offset >= buf->length)
-	{
-		dev_info(smi2021->dev, "Will this ever happen?\n");
-		return;
-	}
-
-	dst = buf->mem + offset;
-	*dst = p;
-	buf->pos++;
-}
-
-#endif
 
 /*
  * Scan the saa7113 Active video data.
@@ -634,7 +462,7 @@ static void copy_video(struct smi2021 *smi2021, u8 p)
 #define TRC_FIELD_THIS_LINE(a)	((a&0x40) ? 1 : 0)
 #define TRC_VERTICAL_BLANK(a)	(a&0x20)
 
-
+// this is the state-machine-handler
 static void parse_video(struct smi2021 *smi2021, u8 *p, int size)
 {
 
@@ -644,6 +472,7 @@ static void parse_video(struct smi2021 *smi2021, u8 *p, int size)
 	int skip, wrote;
 	u8 currentByteVal;
 
+#ifdef DEBUG
 	if(!(smi2021->debug.totalFrames%500) && false)
 	{
 		dev_info(smi2021->dev,"%d:(%d:%d):(%d:%d)\n",	smi2021->debug.totalFrames,
@@ -651,7 +480,7 @@ static void parse_video(struct smi2021 *smi2021, u8 *p, int size)
 														smi2021->debug.vblank_found_field0, smi2021->debug.vblank_found_field1
 				);
 	}
-
+#endif
 
 
 	// sync_state is handling a state machine - we start at HSYNC
@@ -790,14 +619,6 @@ static void parse_video(struct smi2021 *smi2021, u8 *p, int size)
 				{
 					/* SAV (start of active data) */
 
-					// get the field number - 0 or 1 - they alternate 
-					smi2021->parseVideoStateMachine.fieldNumber = TRC_FIELD_THIS_LINE(currentByteVal);
-
-					if(smi2021->parseVideoStateMachine.fieldNumber)
-						smi2021->debug.SAV_found_field0++;
-					else
-						smi2021->debug.SAV_found_field1++;
-
 
 					// is this a vertblank - i.e. end of frame
 					if (TRC_VERTICAL_BLANK(currentByteVal))
@@ -805,11 +626,61 @@ static void parse_video(struct smi2021 *smi2021, u8 *p, int size)
 						smi2021->parseVideoStateMachine.sync_state = VBLANK;
 						// if it's field1 then we've finished this frame, both times
 
-						// sanity check the row we're on ..
+
+#ifdef _USE_VBLANK_DODGY_TO_DETECT_FRAME_DONE
+
+						// get the field number - 0 or 1 
+						smi2021->parseVideoStateMachine.fieldNumber = TRC_FIELD_THIS_LINE(currentByteVal);
+
+#ifdef DEBUG
+
+						if(smi2021->parseVideoStateMachine.fieldNumber)
+							smi2021->debug.SAV_found_field0++;
+						else
+							smi2021->debug.SAV_found_field1++;
+#endif
+
+						// sanity check the row we're on .. this is uber dodgy
 						if( (smi2021->parseVideoStateMachine.fieldNumber?smi2021->parseVideoStateMachine.active_line_count.field1:smi2021->parseVideoStateMachine.active_line_count.field1 ) > 250)
 						{
 
-						if(smi2021->parseVideoStateMachine.fieldNumber) 
+							if(smi2021->parseVideoStateMachine.fieldNumber) 
+							{
+								/* flag as done, dusted */
+								smi2021->parseVideoStateMachine.endOfFrameDetected=true;
+
+								// if we're grabbing this frame, commit to the v4l
+								if(!smi2021->parseVideoStateMachine.frameBeingIgnored)
+								{
+									finishFrameBlit(smi2021);
+								}
+
+#ifdef DEBUG
+								smi2021->debug.totalFrames++;
+#endif
+
+							}
+						}
+#endif
+
+					}
+					else 
+					{
+
+#ifndef _USE_VBLANK_DODGY_TO_DETECT_FRAME_DONE
+
+
+#ifdef DEBUG
+
+						if(smi2021->parseVideoStateMachine.fieldNumber)
+							smi2021->debug.SAV_found_field0++;
+						else
+							smi2021->debug.SAV_found_field1++;
+#endif
+
+						// IIF we are throwing away vblank frames, and ignoing THEIR field number
+						// if the last field we saw was 1, and THIS one is 0, we've ended frame
+						if(smi2021->parseVideoStateMachine.fieldNumber && !TRC_FIELD_THIS_LINE(currentByteVal))
 						{
 							/* flag as done, dusted */
 							smi2021->parseVideoStateMachine.endOfFrameDetected=true;
@@ -820,13 +691,15 @@ static void parse_video(struct smi2021 *smi2021, u8 *p, int size)
 								finishFrameBlit(smi2021);
 							}
 
+#ifdef DEBUG
 							smi2021->debug.totalFrames++;
+#endif
+						}
 
-						}
-						}
-					}
-					else 
-					{
+						// get the field number NOW - 0 or 1 
+						smi2021->parseVideoStateMachine.fieldNumber = TRC_FIELD_THIS_LINE(currentByteVal);
+
+#endif
 
 
 
@@ -858,17 +731,19 @@ static void parse_video(struct smi2021 *smi2021, u8 *p, int size)
 				break;
 
 
-
+				// in 625/50 and 525/60, the blanking lines are the 'extra lines' beyond 576/483 (respectively)
 			case VBLANK:
 					// skip to the end of this ????, which is either to the end of the buffer, or the end of remaining bytes
 					skip = MIN(smi2021->parseVideoStateMachine.bytes_remaining_to_fetch, (end - next));
 					smi2021->parseVideoStateMachine.bytes_remaining_to_fetch -= skip;
 					next += skip ;
 
+#ifdef DEBUG
 					if(smi2021->parseVideoStateMachine.fieldNumber)
 						smi2021->debug.vblank_found_field0++;
 					else
 						smi2021->debug.vblank_found_field1++;
+#endif
 
 					// if we've consumed this line start again
 					if(smi2021->parseVideoStateMachine.bytes_remaining_to_fetch<=0)
@@ -1000,9 +875,6 @@ static struct urb *smi2021_setup_iso_transfer(struct smi2021 *smi2021)
 	struct urb *ip;
 	int i, size = smi2021->iso_size;
 
-	//dev_info(smi2021->dev, "smi2021_setup_iso_transfer\n");
-
-
 	ip = usb_alloc_urb(SMI2021_ISOC_PACKETS, GFP_KERNEL);
 	if (ip == NULL)
 		return NULL;
@@ -1066,8 +938,10 @@ int smi2021_start(struct smi2021 *smi2021)
 	 */
 	smi2021_get_reg(smi2021, 0x4a, 0x08, &reg);
 	smi2021_set_reg(smi2021, 0x4a, 0x08, reg | 0x80);
-
 	dev_info(smi2021->dev,"register 0x08 : %02x\n", reg);
+
+
+
 
 	/*
 	 * Reset RTSO0 6 Times (Bit 7)
@@ -1115,6 +989,15 @@ int smi2021_start(struct smi2021 *smi2021)
 		if (rc < 0)
 			goto start_fail;
 	}
+
+	// i'm ASSUMING that setting AUFD (above) will make the chip work out what's going on, and a subsequent query will
+	// reflect what's actually happneing ... so let's do the subsequent query ...
+	smi2021_get_reg(smi2021, 0x4a, 0x08, &reg);
+
+	// this is an important flag for handling vertical line sync in the parse_video state machine
+	smi2021->fieldSelection=(reg&0x40)?itu556_525ln60hz:itu556_625ln50hz;
+
+	dev_info(smi2021->dev,"smi2021->fieldSelection %d\n", smi2021->fieldSelection);
 
 	/* I have no idea about what this register does with this value. */
 	smi2021_set_reg(smi2021, 0, 0x1800, 0x0d);

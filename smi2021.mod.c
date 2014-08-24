@@ -120,4 +120,4 @@ MODULE_ALIAS("usb:v1C88p003Dd*dc*dsc*dp*ic*isc*ip*in*");
 MODULE_ALIAS("usb:v1C88p003Ed*dc*dsc*dp*ic*isc*ip*in*");
 MODULE_ALIAS("usb:v1C88p003Fd*dc*dsc*dp*ic*isc*ip*in*");
 
-MODULE_INFO(srcversion, "C4ABE95EE82D28AB7FBE0D9");
+MODULE_INFO(srcversion, "17AB12C383C4597CDA81518");

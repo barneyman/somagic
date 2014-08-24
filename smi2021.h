@@ -191,9 +191,9 @@ struct smi2021 {
 
 		unsigned bytes_remaining_to_fetch;
 		
+
 		struct
 		{
-
 			unsigned field0, field1;
 
 		} active_line_count;
@@ -203,11 +203,21 @@ struct smi2021 {
 
 	} parseVideoStateMachine;
 
+	// what vertical timing are we using (tables 4&5 in the 7713 spec)
+	// subaddress 08 bitmask 0x40
+	enum {
+
+		itu556_525ln60hz=0, itu556_625ln50hz
+		
+	} fieldSelection;
+
+#ifdef DEBUG
 	struct {
 		unsigned totalFrames;
 		unsigned vblank_found_field0, vblank_found_field1;
 		unsigned SAV_found_field0, SAV_found_field1;
 	} debug;
+#endif
 
 
 	// my stuff
