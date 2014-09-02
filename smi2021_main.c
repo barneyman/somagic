@@ -40,7 +40,7 @@
 #define SMI2021_MODE_STANDBY		0x03
 #define SMI2021_REG_CTRL_HEAD		0x0b
 
-
+// get off the URB callback ASAP by putting the returned URB into a workqueue
 #define _USE_WORK_QUEUE
 
 #ifdef _USE_WORK_QUEUE
@@ -340,8 +340,6 @@ static int smi2021_initialize(struct smi2021 *smi2021)
 static unsigned debugCount=_EVERY_X_FRAMES;
 #endif
 
-unsigned missedBufferRequests=0;
-
 static struct smi2021_buf *smi2021_get_buf(struct smi2021 *smi2021)
 {
 	unsigned long flags;
@@ -363,19 +361,8 @@ static struct smi2021_buf *smi2021_get_buf(struct smi2021 *smi2021)
 		/* No free buffers, userspace likely too slow! */
 		spin_unlock_irqrestore(&smi2021->buf_lock, flags);
 		smi2021->runtimeStats.missedV4lBuffers++;
-#ifdef DEBUG
-		missedBufferRequests++;
-#endif
 		return NULL;
 	}
-
-	// if we're in here after missing some, tell them
-	if(missedBufferRequests)
-	{
-		dev_warn(smi2021->dev,"no buffers available %u times\n", missedBufferRequests);
-		missedBufferRequests=0;
-	}
-
 
 	buf = list_first_entry(&smi2021->bufs, struct smi2021_buf, list);
 	list_del(&buf->list);
@@ -392,7 +379,6 @@ static void smi2021_buf_done(struct smi2021 *smi2021)
 	buf->vb.v4l2_buf.sequence = smi2021->sequence++;
 	buf->vb.v4l2_buf.field = V4L2_FIELD_INTERLACED;
 
-
 	vb2_set_plane_payload(&buf->vb, 0, SMI2021_BYTES_PER_LINE* smi2021->currentFrameHeight);
 	vb2_buffer_done(&buf->vb, VB2_BUF_STATE_DONE);
 
@@ -403,8 +389,6 @@ static void smi2021_buf_done(struct smi2021 *smi2021)
 // 1440
 #define BYTES_OF_UYUV_DATA_EXPECTED	SMI2021_BYTES_PER_LINE
 
-#define _HACK_ROWLINES
-//#define _HACK_ROWLINES_MEMSET
 
 static int blitVideoToBuffer(struct smi2021 *smi2021, u8 *sourceBuffer, u8 *endBuffer)
 {
@@ -417,31 +401,18 @@ static int blitVideoToBuffer(struct smi2021 *smi2021, u8 *sourceBuffer, u8 *endB
 	// bounds check buf here?
 	if(buf)
 	{
-		// work out where to start writing, each line alternates between fields
-		// f0 l0 - 0
-		// f1 l0 - 1
-		// f0 l1 - 2
-		// f1 l1 - 3
-#ifdef _HACK_ROWLINES
-		if(!smi2021->parseVideoStateMachine.fieldNumber)
-		{
-			lineOfOutput=smi2021->parseVideoStateMachine.active_line_count.field0;
-		}
-		else
-		{
-			lineOfOutput=(smi2021->parseVideoStateMachine.active_line_count.field1)+(576/2);
-		}
-#else
+		// work out where to start writing, dependent on field number
 		// work out what line to squirt into
 		if(!smi2021->parseVideoStateMachine.fieldNumber)
 		{
+			// f0 is top/even
 			lineOfOutput=smi2021->parseVideoStateMachine.active_line_count.field0*2;
 		}
 		else
 		{
+			// f1 is bottom/odd
 			lineOfOutput=(smi2021->parseVideoStateMachine.active_line_count.field1*2)+1;
 		}
-#endif
 
 		// work that into a line's buffer address
 		offset=lineOfOutput*BYTES_OF_UYUV_DATA_EXPECTED;
@@ -451,55 +422,17 @@ static int blitVideoToBuffer(struct smi2021 *smi2021, u8 *sourceBuffer, u8 *endB
 		// check we're not off the end of the buffer
 		if(lineOfOutput < smi2021->currentFrameHeight)
 		{
-#ifdef _HACK_ROWLINES_MEMSET
-			memset(buf->mem+offset,0xbf,toWrite);
-#else
-			int writeu16;
-			int intWrite=toWrite/sizeof(int);
-			//if(intWrite)
-			//{
-			//	int *src=(int*)sourceBuffer, *dest=(int*)(buf->mem+offset);
-			//	for(;intWrite;intWrite--,src++,dest++)
-			//	{
-			//		*dest=*src;
-			//	}
-			//	smi2021->runtimeStats.intCopies++;
-
-			//	offset+=intWrite*sizeof(int);
-			//	sourceBuffer=(u8*)src;
-			//	toWrite-=(intWrite*sizeof(int));
-			//}
-			
-			//writeu16=toWrite/sizeof(u16);
-			//if(writeu16)
-			//{
-			//	u16 *src=(u16*)sourceBuffer, *dest=(u16*)(buf->mem+offset);
-			//	for(;writeu16;writeu16--,src++,dest++)
-			//	{
-			//		*dest=*src;
-			//	}
-			//	smi2021->runtimeStats.intCopies++;
-
-			//	offset+=writeu16*sizeof(u16);
-			//	sourceBuffer=(u8*)src;
-			//	toWrite-=(writeu16*sizeof(u16));
-			//}
-
-			// copy in WORDS if we can, memcpy otherwise
+			// copy in
 			if(toWrite)
 			{
-				smi2021->runtimeStats.slowCopies++;
 				// it's not word aligned, do it the hard way
 				memcpy(buf->mem+offset,sourceBuffer,toWrite);
 			}
 
-#endif
 		}
 		else
 		{
-			//dev_warn(smi2021->dev,"Trying to poke beyond source buffer %d/%d\n",lineOfOutput, smi2021->currentFrameHeight);
 			smi2021->runtimeStats.tooManyScanlines++;
-			//smi2021_stop(smi2021);
 		}
 	}
 
@@ -511,6 +444,7 @@ static int blitVideoToBuffer(struct smi2021 *smi2021, u8 *sourceBuffer, u8 *endB
 
 static void finishFrameBlit(struct smi2021 *smi2021)
 {
+	// if we HAVE a buffer, offload it
 	if(smi2021->cur_buf)
 		smi2021_buf_done(smi2021);
 }
@@ -545,16 +479,6 @@ static void parse_video(struct smi2021 *smi2021, u8 *p, int size)
 	int skip, wrote;
 	u8 currentByteVal;
 
-#ifdef DEBUG
-	if(!(smi2021->debug.totalFrames%500) && false)
-	{
-		dev_info(smi2021->dev,"%d:(%d:%d):(%d:%d)\n",	smi2021->debug.totalFrames,
-														smi2021->debug.SAV_found_field0, smi2021->debug.SAV_found_field1,
-														smi2021->debug.vblank_found_field0, smi2021->debug.vblank_found_field1);
-	}
-#endif
-
-
 	// sync_state is handling a state machine - we start at HSYNC
 	// 
 	do
@@ -566,7 +490,6 @@ static void parse_video(struct smi2021 *smi2021, u8 *p, int size)
 		/*
 		 * Timing reference code (TRC):
 		 *     [ff 00 00 SAV] [ff 00 00 EAV]
-		 * Where SAV is 80 or c7, and EAV is 9d or da.
 		 * A line of video will look like (1448 bytes total):
 		 *     [ff 00 00 EAV] [ff 00 00 SAV] [1440 bytes of UYVY video] (repeat on next line)
 		 */
@@ -586,9 +509,6 @@ static void parse_video(struct smi2021 *smi2021, u8 *p, int size)
 				{
 					// unexpected, fall back to HSYNC
 					smi2021->parseVideoStateMachine.sync_state = HSYNC;
-#ifdef DEBUG
-					dev_warn(smi2021->dev,"HSYNC fallback from VHSYNC_BLANK2 (%02x)\n", currentByteVal);
-#endif
 				}
 				next++;
 				break;
@@ -605,19 +525,13 @@ static void parse_video(struct smi2021 *smi2021, u8 *p, int size)
 					next++;
 					break;
 				}
-				// otherwise fall thru
+				// otherwise fall thru - bad form for switch ... so sue me
 
 			case HSYNC:
 				smi2021->runtimeStats.hsync++;
 				// we expect ff
 				if (currentByteVal == (u8)0xff) 
 				{
-					if(smi2021->runtimeStats.missedHSync)
-					{
-						//dev_warn(smi2021->dev,"HSYNC failed %u consecutively\n", smi2021->runtimeStats.missedHSync);
-						//smi2021->runtimeStats.missedHSync=0;
-					}
-
 					// move up the state tree
 					smi2021->parseVideoStateMachine.sync_state = SYNCZ1;
 				} 
@@ -674,7 +588,7 @@ static void parse_video(struct smi2021 *smi2021, u8 *p, int size)
 				 * Found 0xff 0x00 0x00, now expecting SAV or EAV. Might
 				 * also be the SDID (sliced data ID), 0x00.
 				 */
-				if (!currentByteVal&0x80) 
+				if (!(currentByteVal&0x80))
 				{
 					/*
 					 * SDID detected, so we still haven't found the
@@ -716,7 +630,7 @@ static void parse_video(struct smi2021 *smi2021, u8 *p, int size)
 							smi2021->runtimeStats.SAV_found_field1++;
 
 						// IFF we are throwing away vblank frames (and ignoing THEIR field number) then
-						// if the last field we saw was 1, and THIS one is 0, we've ended frame
+						// if the last field we saw was 1, and THIS one is 0, we've ended the frame
 						if(smi2021->parseVideoStateMachine.fieldNumber>0 && TRC_FIELD_THIS_LINE(currentByteVal)==0)
 						{
 							// if we're grabbing this frame, commit to the v4l
@@ -743,9 +657,6 @@ static void parse_video(struct smi2021 *smi2021, u8 *p, int size)
 								smi2021->parseVideoStateMachine.frameBeingIgnored=true;
 							}
 
-#ifdef DEBUG
-							smi2021->debug.totalFrames++;
-#endif
 						}
 
 						// get the field number NOW - 0 or 1 
@@ -762,24 +673,16 @@ static void parse_video(struct smi2021 *smi2021, u8 *p, int size)
 				next++;
 				break;
 
-
 				// in 625/50 and 525/60, the blanking lines are the 'extra lines' beyond 576/483 (respectively)
 			case VBLANK:
 				smi2021->runtimeStats.blank++;
 
-				// skip to the end of this ????, which is either to the end of the buffer, or the end of remaining bytes
+				// skip to the end of this packet, which may or may contain all expected bytes, if it doesn't we'll be back here soon
 				skip = MIN(smi2021->parseVideoStateMachine.bytes_remaining_to_fetch, (end - next));
 				smi2021->parseVideoStateMachine.bytes_remaining_to_fetch -= skip;
 				next += skip ;
 
-#ifdef DEBUG
-				if(smi2021->parseVideoStateMachine.fieldNumber)
-					smi2021->debug.vblank_found_field0++;
-				else
-					smi2021->debug.vblank_found_field1++;
-#endif
-
-				// if we've consumed this line start again
+				// if we've consumed this line start the state machine again
 				if(!smi2021->parseVideoStateMachine.bytes_remaining_to_fetch)
 				{
 					smi2021->parseVideoStateMachine.sync_state = HSYNC;
@@ -788,15 +691,11 @@ static void parse_video(struct smi2021 *smi2021, u8 *p, int size)
 
 			case VACTIVE:
 				smi2021->runtimeStats.active++;
-
 				// we are actively consuming row data
-				//wrote=blitVideoToBuffer(smi2021, next, end);
-				//next += wrote;
+				wrote=blitVideoToBuffer(smi2021, next, end);
+				next += wrote;
 
-				skip = MIN(smi2021->parseVideoStateMachine.bytes_remaining_to_fetch, (end - next));
-				smi2021->parseVideoStateMachine.bytes_remaining_to_fetch -= skip;
-				next += skip ;
-
+				// if we've consumed all expected bytes, flag a state machine restart
 				if (!smi2021->parseVideoStateMachine.bytes_remaining_to_fetch) 
 				{
 					smi2021->parseVideoStateMachine.sync_state = HSYNC;
@@ -855,12 +754,10 @@ static void process_packet(struct smi2021 *smi2021, u8 *p, int size, int intende
 				break;
 			case cpu_to_be32(0xaaaa0001):
 				smi2021->runtimeStats.audioPackets++;
-				//dev_info(smi2021->dev, "process_packet AUDIO (%x)\n",size);
 				//smi2021_audio(smi2021, p+i+4, sizeOfthisChunk-4);
 				break;
 			default:
 				smi2021->runtimeStats.unknownPackets++;
-				//dev_warn(smi2021->dev, "process_packet UNKNOWN (%d)\n",size);
 				break;
 
 		}
@@ -897,15 +794,6 @@ static void processUSBworkFn(struct work_struct *work)
 		unsigned char *data = ip->transfer_buffer + descriptor->offset;
 		int frameStatus=descriptor->status;
 
-		//if(descriptor->actual_length != descriptor->length)
-		//	dev_warn(smi2021->dev, "undersize packet %x/%x\n",descriptor->actual_length,descriptor->length);
-
-		//if(descriptor->actual_length == descriptor->length)
-		//	dev_warn(smi2021->dev, "onsize packet %x/%x\n",descriptor->actual_length,descriptor->length);
-
-		//if(ip->start_frame)
-		//	dev_warn(smi2021->dev, "frame  %x\n",ip->start_frame);
-
 		if(frameStatus)
 		{
 			dev_warn(smi2021->dev, "frame status %x\n",frameStatus);
@@ -933,8 +821,6 @@ static void processUSBworkFn(struct work_struct *work)
 
 static void smi2021_iso_cb(struct urb *ip)
 {
-	static int seenCount=0;
-
 #ifdef _USE_WORK_QUEUE
 	my_work_t* work = NULL;
 #else
@@ -950,22 +836,7 @@ static void smi2021_iso_cb(struct urb *ip)
 		return;
 	}
 
-	if(!((++seenCount)%1000))
-	{
-		struct usb_iso_packet_descriptor *frame=&ip->iso_frame_desc[0];
-		int bytecount=0;
-		if(!frame->status)
-		{
-			//for(bytecount=0;bytecount<64;bytecount++)
-			//{
-			//	u8 *databytes=(u8*)ip->transfer_buffer;
-			//	dev_info(smi2021->dev, "%02x", databytes[bytecount]);
-
-			//}
-		}
-
-		dev_info(smi2021->dev, "seen %d URBs\n", seenCount);
-	}
+	smi2021->runtimeStats.URBcount++;
 
 	switch (ip->status) {
 		case 0:
@@ -993,15 +864,16 @@ static void smi2021_iso_cb(struct urb *ip)
 	}
 #ifdef _USE_WORK_QUEUE
 
+	// alloc new work - i'm assuming kmalloc is more efficient than me keeping a stack of work packets
 	work = (my_work_t *)kmalloc(sizeof(my_work_t), GFP_KERNEL);
 	if(work)
 	{
 		INIT_WORK((struct work_struct *)work, &processUSBworkFn);
 
+		// point this work at the URB
 		work->ip=ip;
 
 		queue_work(processUSBworkQueue, (struct work_struct *)work);
-		//queue_delayed_work(processUSBworkQueue, (struct work_struct *)work,20000);
 	}
 
 #else
@@ -1113,8 +985,11 @@ int smi2021_start(struct smi2021 *smi2021)
 	dev_info(smi2021->dev,"register 0x08 : %02x\n", reg);
 
 #ifdef _USE_WORK_QUEUE
+	// create the work queue
 	processUSBworkQueue=create_workqueue("URB Queue");
 #endif
+
+	// TODO - lift the 'full set' of sets from the somagic-capture user code
 
 
 	/*
@@ -1193,13 +1068,10 @@ void smi2021_stop(struct smi2021 *smi2021)
 	int i;
 	unsigned long flags;
 
-	dev_info(smi2021->dev, "smi2021_stop, caught %u ignored %u, missed %u, HSYNC misses %u\nslowCopies %x fastCopies %x - %x 0len URBs\n", 
+	dev_info(smi2021->dev, "smi2021_stop, caught %u ignored %u, dropped %u, HSYNC misses %u\n%x 0len URBs\n", 
 		smi2021->runtimeStats.caughtFrames,smi2021->runtimeStats.ignoredFrames,
 		smi2021->runtimeStats.missedV4lBuffers,
 		smi2021->runtimeStats.missedHSync,
-
-		smi2021->runtimeStats.slowCopies, 
-		smi2021->runtimeStats.intCopies,
 
 		smi2021->runtimeStats.zeroLenURBs
 		);
@@ -1218,7 +1090,7 @@ void smi2021_stop(struct smi2021 *smi2021)
 		smi2021->runtimeStats.SAV_found_field1
 		);
 
-	dev_info(smi2021->dev,"states h %x,b2 %x,b1 %x,z1 %x,z2 %x,av %x,b %x,a %x\n",
+	dev_info(smi2021->dev,"states h %x,b2 %x,b1 %x,z1 %x,z2 %x,av %x,b %x,a %x\nURBS %x",
 		smi2021->runtimeStats.hsync, 
 		smi2021->runtimeStats.blank2, 
 		smi2021->runtimeStats.blank1, 
@@ -1226,8 +1098,15 @@ void smi2021_stop(struct smi2021 *smi2021)
 		smi2021->runtimeStats.synchz2, 
 		smi2021->runtimeStats.synchav, 
 		smi2021->runtimeStats.blank, 
-		smi2021->runtimeStats.active
+		smi2021->runtimeStats.active,
+
+		smi2021->runtimeStats.URBcount
 		);
+
+	// tell the dongle to stop
+	usb_set_interface(smi2021->udev, 0, 0);
+	smi2021_set_mode(smi2021, SMI2021_MODE_STANDBY);
+
 
 	/* Cancel running transfers */
 	for (i = 0; i < SMI2021_ISOC_TRANSFERS; i++) {
@@ -1235,6 +1114,7 @@ void smi2021_stop(struct smi2021 *smi2021)
 		if (ip == NULL)
 			continue;
 		usb_kill_urb(ip);
+
 #ifndef _USE_WORK_QUEUE
 		kfree(ip->transfer_buffer);
 		usb_free_urb(ip);
@@ -1243,7 +1123,13 @@ void smi2021_stop(struct smi2021 *smi2021)
 	}
 
 #ifdef _USE_WORK_QUEUE
+
+	// wait a 'bit' for the URBs above to be cancelled, and flow thru to work queue
+	msleep(250);
+
+	// then flush those
 	flush_workqueue(processUSBworkQueue);
+	// and clean up
 	destroy_workqueue(processUSBworkQueue);
 
 	for (i = 0; i < SMI2021_ISOC_TRANSFERS; i++) {
@@ -1258,8 +1144,6 @@ void smi2021_stop(struct smi2021 *smi2021)
 
 #endif
 
-	usb_set_interface(smi2021->udev, 0, 0);
-	smi2021_set_mode(smi2021, SMI2021_MODE_STANDBY);
 
 	smi2021_stop_audio(smi2021);
 
@@ -1267,8 +1151,7 @@ void smi2021_stop(struct smi2021 *smi2021)
 	spin_lock_irqsave(&smi2021->buf_lock, flags);
 	while (!list_empty(&smi2021->bufs)) 
 	{
-		struct smi2021_buf *buf = list_first_entry(&smi2021->bufs,
-						struct smi2021_buf, list);
+		struct smi2021_buf *buf = list_first_entry(&smi2021->bufs,struct smi2021_buf, list);
 		vb2_buffer_done(&buf->vb, VB2_BUF_STATE_ERROR);
 		list_del(&buf->list);
 	}
@@ -1279,8 +1162,7 @@ void smi2021_stop(struct smi2021 *smi2021)
 
 static void smi2021_release(struct v4l2_device *v4l2_dev)
 {
-	struct smi2021 *smi2021 = container_of(v4l2_dev, struct smi2021,
-								v4l2_dev);
+	struct smi2021 *smi2021 = container_of(v4l2_dev, struct smi2021, v4l2_dev);
 	i2c_del_adapter(&smi2021->i2c_adap);
 
 	v4l2_ctrl_handler_free(&smi2021->ctrl_handler);
@@ -1375,10 +1257,8 @@ static int smi2021_usb_probe(struct usb_interface *intf, const struct usb_device
 
 	dev_info(dev, "max packet size %d bytes - additional frames %d",size & 0x07ff, (((size & 0x1800) >> 11)) );
 	// usb spec says & 0x7fff dictates max packet size
-	// & 1800 ROR 11 outlines how many EXTRA sets are available in Hi-Speed+ micro-frames
+	// & (0x1800 ROR 11) outlines how many EXTRA sets are available in Hi-Speed+ micro-frames
 	size = (size & 0x07ff) * (((size & 0x1800) >> 11) + 1);
-
-
 
 	// primary difference is the late firmwares can handle the quad input variant
 	switch (udev->descriptor.idProduct) {
@@ -1470,8 +1350,8 @@ static int smi2021_usb_probe(struct usb_interface *intf, const struct usb_device
 
 	usb_set_intfdata(intf, smi2021);
 
-	// ENABLE ME!!!
-	//smi2021_snd_register(smi2021);
+	// enable audio queue
+	smi2021_snd_register(smi2021);
 
 
 	/* video structure */

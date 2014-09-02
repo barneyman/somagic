@@ -50,8 +50,8 @@
 
 #define SMI2021_DRIVER_VERSION "0.1"
 
-#define SMI2021_ISOC_TRANSFERS	16
-#define SMI2021_ISOC_PACKETS	64
+#define SMI2021_ISOC_TRANSFERS	32
+#define SMI2021_ISOC_PACKETS	32
 
 #define SMI2021_ISOC_EP		0x82
 
@@ -178,49 +178,53 @@ struct smi2021 {
 
 	/* stuff from the userspace impl */
 
-	// this sttruct is memset for each new frame
+	// this struct is memset for each new frame
 	struct 
 	{
+		// state machine enum
 		enum smi2021_sync		sync_state;
 
-		bool frameBeingIgnored;		// flagged when have started, awaiting a frame start, or missed a buffer fetch
+		// flagged when have started, awaiting a frame start, or missed a buffer fetch
+		bool frameBeingIgnored;		
 
+		// during a vblank/vactive, this count allows us to handle iso-packet boundaries
 		unsigned bytes_remaining_to_fetch;
+		// current field during vactive
+		unsigned fieldNumber;
 
+		// counting the fields as they go passed, so we know where to scribble
 		struct
 		{
 			unsigned field0, field1;
 
 		} active_line_count;
 
-		
-		unsigned fieldNumber;
 
 	} parseVideoStateMachine;
 
-
+	// these are informational only, so unsigned wrap isn't an issue
 	struct 
 	{
-		// how many times we lost hsync 
-		unsigned missedHSync, horizBlanks, vertBlanks;
+		// how many times we lost hsync (normally inc'd caused by packetloss)
+		unsigned missedHSync;
+		// just for fun
+		unsigned horizBlanks, vertBlanks;
 		// how many times we opened the v4l larder and it was bare
 		unsigned missedV4lBuffers;
-		// how many full frames we saw
+		// how many full frames we saw, and how many we ignored (we ignore if we failed to get a buffer from v4l)
 		unsigned caughtFrames, ignoredFrames;
-		// how many copies
-		unsigned slowCopies, intCopies;
-		// zero len urbs
+		// zero len urbs (broken packets)
 		unsigned zeroLenURBs;
 		// urb packet types
 		unsigned videoPackets, audioPackets, unknownPackets;
-		// poke beyond count
+		// poke beyond scanline count
 		unsigned tooManyScanlines;
-
 		// state counts
 		unsigned hsync, blank2, blank1, synchz1, synchz2, synchav, blank, active;
-
 		// field counts
 		unsigned SAV_found_field0, SAV_found_field1;
+		// USB urbs
+		unsigned URBcount;
 
 	} runtimeStats;
 
@@ -234,15 +238,6 @@ struct smi2021 {
 		
 	} fieldSelection;
 
-#ifdef DEBUG
-	struct {
-		unsigned totalFrames;
-		unsigned vblank_found_field0, vblank_found_field1;
-	} debug;
-#endif
-
-
-	// my stuff
 	
 
 
