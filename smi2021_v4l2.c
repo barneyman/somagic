@@ -77,7 +77,7 @@ static int vidioc_fmt_vid_cap(struct file *file, void *priv,
 	struct smi2021 *smi2021 = video_drvdata(file);
 
 	f->fmt.pix.width = SMI2021_BYTES_PER_LINE / 2;
-	f->fmt.pix.height = smi2021->cur_height;
+	f->fmt.pix.height = smi2021->currentFrameHeight;
 	f->fmt.pix.pixelformat = V4L2_PIX_FMT_UYVY;
 	f->fmt.pix.field = V4L2_FIELD_INTERLACED;
 	f->fmt.pix.bytesperline = SMI2021_BYTES_PER_LINE;
@@ -101,6 +101,7 @@ static int vidioc_g_input(struct file *file, void *priv, unsigned int *i)
 	return 0;
 }
 
+
 static int vidioc_s_std(struct file *file, void *priv, v4l2_std_id norm)
 {
 	struct smi2021 *smi2021 = video_drvdata(file);
@@ -108,13 +109,16 @@ static int vidioc_s_std(struct file *file, void *priv, v4l2_std_id norm)
 	if (vb2_is_busy(&smi2021->vb2q))
 		return -EBUSY;
 
-	smi2021->cur_norm = norm;
-	if (norm & V4L2_STD_525_60)
-		smi2021->cur_height = SMI2021_NTSC_LINES;
-	else if (norm & V4L2_STD_625_50)
-		smi2021->cur_height = SMI2021_PAL_LINES;
-	else
+	if(!smi2021_setSourceSignalFormat(smi2021,norm))
+	{
+	//smi2021->cur_norm = norm;
+	//if (norm & V4L2_STD_525_60)
+	//	smi2021->cur_height = SMI2021_NTSC_LINES;
+	//else if (norm & V4L2_STD_625_50)
+	//	smi2021->cur_height = SMI2021_PAL_LINES;
+	//else
 		return -EINVAL;
+	}
 
 	v4l2_device_call_all(&smi2021->v4l2_dev, 0, core, s_std,
 			     smi2021->cur_norm);
@@ -184,12 +188,12 @@ static int queue_setup(struct vb2_queue *vq,
 {
 	struct smi2021 *smi2021 = vb2_get_drv_priv(vq);
 
-	dev_warn(smi2021->dev, "queue_setup\n");
+	*nbuffers = clamp_t(unsigned int, *nbuffers, 16, 32);
 
-	*nbuffers = clamp_t(unsigned int, *nbuffers, 4, 16);
+	dev_warn(smi2021->dev, "queue_setup (%d buffers)\n", *nbuffers);
 
 	*nplanes = 1;
-	sizes[0] = SMI2021_BYTES_PER_LINE * smi2021->cur_height;
+	sizes[0] = SMI2021_BYTES_PER_LINE * smi2021->currentFrameHeight;
 
 	return 0;
 }
@@ -200,7 +204,6 @@ static void buffer_queue(struct vb2_buffer *vb)
 	struct smi2021 *smi2021 = vb2_get_drv_priv(vb->vb2_queue);
 	struct smi2021_buf *buf = container_of(vb, struct smi2021_buf, vb);
 
-	//dev_info(smi2021->dev, "buffer_queue\n");
 
 	if (smi2021->udev == NULL) 
 	{
@@ -212,14 +215,9 @@ static void buffer_queue(struct vb2_buffer *vb)
 	buf->mem = vb2_plane_vaddr(vb, 0);
 	buf->length = vb2_plane_size(vb, 0);
 
-	buf->pos = 0;
-	buf->trc_av = 0;
-	buf->in_blank = true;
-	buf->second_field = false;
-
 	spin_lock_irqsave(&smi2021->buf_lock, flags);
 
-	if (buf->length < smi2021->cur_height * SMI2021_BYTES_PER_LINE)
+	if (buf->length < smi2021->currentFrameHeight * SMI2021_BYTES_PER_LINE)
 	{
 		dev_warn(smi2021->dev, "done\n");
 		vb2_buffer_done(&buf->vb, VB2_BUF_STATE_ERROR);

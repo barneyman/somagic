@@ -51,7 +51,8 @@
 #define SMI2021_DRIVER_VERSION "0.1"
 
 #define SMI2021_ISOC_TRANSFERS	16
-#define SMI2021_ISOC_PACKETS	10
+#define SMI2021_ISOC_PACKETS	64
+
 #define SMI2021_ISOC_EP		0x82
 
 /* General USB control setup */
@@ -62,14 +63,14 @@
 
 /* General video constants */
 #define SMI2021_BYTES_PER_LINE	1440
-#define SMI2021_PAL_LINES	576
-#define SMI2021_NTSC_LINES	484
+#define SMI2021_PAL_LINES		576
+#define SMI2021_NTSC_LINES		484
 
 /* Timing Reference Codes, see saa7113 datasheet */
 #define SMI2021_TRC_EAV		0x10
 #define SMI2021_TRC_VBI		0x20
 #define SMI2021_TRC_FIELD_2	0x40
-#define SMI2021_TRC		0x80
+#define SMI2021_TRC			0x80
 
 #define _ADAPTED_FROM_USESPACE_CODE
 
@@ -113,12 +114,7 @@ struct smi2021_buf {
 	unsigned int			length;
 
 	bool				active;
-	bool				second_field;
-	bool				in_blank;
-	unsigned int			pos;
 
-	/* ActiveVideo - Line counter */
-	u16				trc_av;
 };
 
 struct smi2021_vid_input {
@@ -167,8 +163,8 @@ struct smi2021 {
 	int				sequence;
 
 	/* Frame settings */
-	int				cur_height;
-	v4l2_std_id			cur_norm;
+	int				currentFrameHeight;
+	v4l2_std_id		cur_norm;
 
 	struct snd_card			*snd_card;
 	struct snd_pcm_substream	*pcm_substream;
@@ -186,11 +182,10 @@ struct smi2021 {
 	struct 
 	{
 		enum smi2021_sync		sync_state;
-		bool endOfFrameDetected;	// a flag to reset this structure when done
+
 		bool frameBeingIgnored;		// flagged when have started, awaiting a frame start, or missed a buffer fetch
 
 		unsigned bytes_remaining_to_fetch;
-		
 
 		struct
 		{
@@ -202,6 +197,34 @@ struct smi2021 {
 		unsigned fieldNumber;
 
 	} parseVideoStateMachine;
+
+
+	struct 
+	{
+		// how many times we lost hsync 
+		unsigned missedHSync, horizBlanks, vertBlanks;
+		// how many times we opened the v4l larder and it was bare
+		unsigned missedV4lBuffers;
+		// how many full frames we saw
+		unsigned caughtFrames, ignoredFrames;
+		// how many copies
+		unsigned slowCopies, intCopies;
+		// zero len urbs
+		unsigned zeroLenURBs;
+		// urb packet types
+		unsigned videoPackets, audioPackets, unknownPackets;
+		// poke beyond count
+		unsigned tooManyScanlines;
+
+		// state counts
+		unsigned hsync, blank2, blank1, synchz1, synchz2, synchav, blank, active;
+
+		// field counts
+		unsigned SAV_found_field0, SAV_found_field1;
+
+	} runtimeStats;
+
+	
 
 	// what vertical timing are we using (tables 4&5 in the 7713 spec)
 	// subaddress 08 bitmask 0x40
@@ -215,7 +238,6 @@ struct smi2021 {
 	struct {
 		unsigned totalFrames;
 		unsigned vblank_found_field0, vblank_found_field1;
-		unsigned SAV_found_field0, SAV_found_field1;
 	} debug;
 #endif
 
@@ -242,6 +264,9 @@ void smi2021_bootloader_disconnect(struct usb_interface *intf);
 void smi2021_toggle_audio(struct smi2021 *smi2021, bool enable);
 int smi2021_start(struct smi2021 *smi2021);
 void smi2021_stop(struct smi2021 *smi2021);
+bool smi2021_setSourceSignalFormat(struct smi2021 *thisSMI2021, v4l2_std_id standardId);
+
+
 
 /* Provided by smi2021_v4l2.c */
 int smi2021_vb2_setup(struct smi2021 *smi2021);
