@@ -10,7 +10,10 @@ That URL references DIFFERENT source to the kernel source in the easycap-somagic
 
 The intention is to have a stable kernel driver for me to access an STB from my pi
 
+the rpi simply can't keep up currently, i'm using the FSM USB driver and 
+i've overclocked to turbo - i'm going to try exposing lower FPS streams
+and also have a bash at using the GPU encoder
+
 This is my first leap into linux coding, so, excuse any blatant errors
 
-NB - it currently (for debug purposes) only commits one frame every 25 - this WILL be remedied (it's SEEING all the frames)
 
