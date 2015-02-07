@@ -1343,10 +1343,8 @@ static int smi2021_usb_probe(struct usb_interface *intf, const struct usb_device
 							&gm7113c_info, NULL);
 
 
-	v4l2_device_call_all(&smi2021->v4l2_dev, 0, video, s_routing,
-			smi2021->vid_inputs[smi2021->cur_input].type, 0, 0);
-	v4l2_device_call_all(&smi2021->v4l2_dev, 0, core, s_std,
-			smi2021->cur_norm);
+	v4l2_device_call_all(&smi2021->v4l2_dev, 0, video, s_routing,smi2021->vid_inputs[smi2021->cur_input].type, 0, 0);
+	v4l2_device_call_all(&smi2021->v4l2_dev, 0, video, s_std, smi2021->cur_norm);
 
 	usb_set_intfdata(intf, smi2021);
 

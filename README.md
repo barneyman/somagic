@@ -16,4 +16,19 @@ and also have a bash at using the GPU encoder
 
 This is my first leap into linux coding, so, excuse any blatant errors
 
+to get this compiling, two choices
+
+a. to Compile this module only
+1. get your linux source
+2. cd /linux/drivers/media/usb
+3. git clone https://github.com/barneyman/somagic.git
+4. make M=drivers/media/usb/somagic modules
+
+b. to add to your kernel build
+1, 2 & 3 from above
+4. edit Kconfig and Makefile in drivers/media/usb to refer to somagic
+5. make menuconfig (in linux dir), add SMI2021 module
+
+ 
+
 

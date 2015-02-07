@@ -120,8 +120,7 @@ static int vidioc_s_std(struct file *file, void *priv, v4l2_std_id norm)
 		return -EINVAL;
 	}
 
-	v4l2_device_call_all(&smi2021->v4l2_dev, 0, core, s_std,
-			     smi2021->cur_norm);
+	v4l2_device_call_all(&smi2021->v4l2_dev, 0, video, s_std, smi2021->cur_norm);
 	return 0;
 }
 
@@ -241,15 +240,15 @@ static int start_streaming(struct vb2_queue *vq, unsigned int count)
 	return smi2021_start(smi2021);
 }
 
-static int stop_streaming(struct vb2_queue *vq)
+static void stop_streaming(struct vb2_queue *vq)
 {
 	struct smi2021 *smi2021 = vb2_get_drv_priv(vq);
 
 	if (smi2021->udev == NULL)
-		return -ENODEV;
+		return;
 
 	smi2021_stop(smi2021);
-	return 0;
+	return;
 }
 
 static struct vb2_ops smi2021_vb2_ops = {
@@ -267,7 +266,7 @@ int smi2021_vb2_setup(struct smi2021 *smi2021)
 	smi2021->vb2q.buf_struct_size = sizeof(struct smi2021_buf);
 	smi2021->vb2q.ops = &smi2021_vb2_ops;
 	smi2021->vb2q.mem_ops = &vb2_vmalloc_memops;
-	smi2021->vb2q.timestamp_type = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
+	smi2021->vb2q.timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 	smi2021->vb2q.lock = &smi2021->vb2q_lock;
 
 	return vb2_queue_init(&smi2021->vb2q);
@@ -283,7 +282,7 @@ int smi2021_video_register(struct smi2021 *smi2021)
 	smi2021->vdev.tvnorms = V4L2_STD_ALL;
 	smi2021->vdev.queue = &smi2021->vb2q;
 	smi2021->vdev.lock = &smi2021->v4l2_lock;
-	set_bit(V4L2_FL_USE_FH_PRIO, &smi2021->vdev.flags);
+	set_bit(V4L2_FL_USES_V4L2_FH, &smi2021->vdev.flags);
 	video_set_drvdata(&smi2021->vdev, smi2021);
 
 	return video_register_device(&smi2021->vdev, VFL_TYPE_GRABBER, -1);
