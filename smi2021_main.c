@@ -375,14 +375,18 @@ static void smi2021_buf_done(struct smi2021 *smi2021)
 {
 	struct smi2021_buf *buf = smi2021->cur_buf;
 
-	v4l2_get_timestamp(&buf->vb.v4l2_buf.timestamp);
-	buf->vb.v4l2_buf.sequence = smi2021->sequence++;
-	buf->vb.v4l2_buf.field = V4L2_FIELD_INTERLACED;
+	if (buf)
+	{
 
-	vb2_set_plane_payload(&buf->vb, 0, SMI2021_BYTES_PER_LINE* smi2021->currentFrameHeight);
-	vb2_buffer_done(&buf->vb, VB2_BUF_STATE_DONE);
+		v4l2_get_timestamp(&buf->vb.v4l2_buf.timestamp);
+		buf->vb.v4l2_buf.sequence = smi2021->sequence++;
+		buf->vb.v4l2_buf.field = V4L2_FIELD_INTERLACED;
 
-	smi2021->cur_buf = NULL;
+		vb2_set_plane_payload(&buf->vb, 0, SMI2021_BYTES_PER_LINE* smi2021->currentFrameHeight);
+		vb2_buffer_done(&buf->vb, VB2_BUF_STATE_DONE);
+
+		smi2021->cur_buf = NULL;
+	}
 }
 
 
@@ -629,7 +633,7 @@ static void parse_video(struct smi2021 *smi2021, u8 *p, int size)
 						else
 							smi2021->runtimeStats.SAV_found_field1++;
 
-						// IFF we are throwing away vblank frames (and ignoing THEIR field number) then
+						// IFF we are throwing away vblank frames (and ignoring THEIR field number) then
 						// if the last field we saw was 1, and THIS one is 0, we've ended the frame
 						if(smi2021->parseVideoStateMachine.fieldNumber>0 && TRC_FIELD_THIS_LINE(currentByteVal)==0)
 						{
@@ -677,7 +681,7 @@ static void parse_video(struct smi2021 *smi2021, u8 *p, int size)
 			case VBLANK:
 				smi2021->runtimeStats.blank++;
 
-				// skip to the end of this packet, which may or may contain all expected bytes, if it doesn't we'll be back here soon
+				// skip to the end of this packet, which may or may not contain all expected bytes, if it doesn't we'll be back here soon
 				skip = MIN(smi2021->parseVideoStateMachine.bytes_remaining_to_fetch, (end - next));
 				smi2021->parseVideoStateMachine.bytes_remaining_to_fetch -= skip;
 				next += skip ;
@@ -987,6 +991,7 @@ int smi2021_start(struct smi2021 *smi2021)
 #ifdef _USE_WORK_QUEUE
 	// create the work queue
 	processUSBworkQueue=create_workqueue("URB Queue");
+	dev_info(smi2021->dev,"using work queues\n");
 #endif
 
 	// TODO - lift the 'full set' of sets from the somagic-capture user code
@@ -1068,7 +1073,7 @@ void smi2021_stop(struct smi2021 *smi2021)
 	int i;
 	unsigned long flags;
 
-	dev_info(smi2021->dev, "smi2021_stop, caught %u ignored %u, dropped %u, HSYNC misses %u\n%x 0len URBs\n", 
+	dev_info(smi2021->dev, "smi2021_stop: caught %u, ignored %u, dropped %u, HSYNC misses %u\n%x 0len URBs\n", 
 		smi2021->runtimeStats.caughtFrames,smi2021->runtimeStats.ignoredFrames,
 		smi2021->runtimeStats.missedV4lBuffers,
 		smi2021->runtimeStats.missedHSync,
@@ -1113,6 +1118,8 @@ void smi2021_stop(struct smi2021 *smi2021)
 		struct urb *ip = smi2021->isoc_urbs[i];
 		if (ip == NULL)
 			continue;
+
+		// kill it
 		usb_kill_urb(ip);
 
 #ifndef _USE_WORK_QUEUE
@@ -1141,8 +1148,10 @@ void smi2021_stop(struct smi2021 *smi2021)
 		smi2021->isoc_urbs[i] = NULL;
 	}
 
-
 #endif
+
+	// kill the buffer we may have in play
+	smi2021_buf_done(smi2021);
 
 
 	smi2021_stop_audio(smi2021);

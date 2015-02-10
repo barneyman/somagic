@@ -77,8 +77,7 @@ struct smi2021_firmware available_fw[] = {
 static const struct firmware *firmware[ARRAY_SIZE(available_fw)];
 static int firmwares = -1;
 
-static int smi2021_load_firmware(struct usb_device *udev,
-					const struct firmware *firmware)
+static int smi2021_load_firmware(struct usb_device *udev,const struct firmware *firmware)
 {
 	int i, size, rc;
 	struct smi2021_set_hw_state *hw_state;
@@ -87,28 +86,31 @@ static int smi2021_load_firmware(struct usb_device *udev,
 	size = FIRMWARE_CHUNK_SIZE + FIRMWARE_HEADER_SIZE;
 	chunk = kzalloc(size, GFP_KERNEL);
 
-	if (chunk == NULL) {
-		dev_err(&udev->dev,
-			"could not allocate space for firmware chunk\n");
+	if (chunk == NULL) 
+	{
+		dev_err(&udev->dev,"could not allocate space for firmware chunk\n");
 		rc = -ENOMEM;
 		goto end_out;
 	}
 
 	hw_state = kzalloc(sizeof(*hw_state), GFP_KERNEL);
-	if (hw_state == NULL) {
+	if (hw_state == NULL) 
+	{
 		dev_err(&udev->dev, "could not allocate space for usb data\n");
 		rc = -ENOMEM;
 		goto free_out;
 	}
 
-	if (firmware == NULL) {
+	if (firmware == NULL) 
+	{
 		dev_err(&udev->dev, "firmware is NULL\n");
 		rc = -ENODEV;
 		goto free_out;
 	}
 
-	if (firmware->size % FIRMWARE_CHUNK_SIZE) {
-		dev_err(&udev->dev, "firmware has wrong size\n");
+	if (firmware->size % FIRMWARE_CHUNK_SIZE) 
+	{
+		dev_err(&udev->dev, "firmware has wrong size (%d)\n", firmware->size);
 		rc = -ENODEV;
 		goto free_out;
 	}
@@ -186,42 +188,49 @@ static int smi2021_choose_firmware(struct usb_device *udev)
 	return 0;
 }
 
-int smi2021_bootloader_probe(struct usb_interface *intf,
-					const struct usb_device_id *devid)
+int smi2021_bootloader_probe(struct usb_interface *intf,const struct usb_device_id *devid)
 {
 	struct usb_device *udev = interface_to_usbdev(intf);
 	int rc, i;
 
 	/* Check what firmwares are available in the system */
-	for (i = 0; i < ARRAY_SIZE(available_fw); i++) {
-		dev_info(&udev->dev, "Looking for: %s\n",
-			 available_fw[i].name);
-		rc = request_firmware(&firmware[firmwares + 1],
-			available_fw[i].name, &udev->dev);
+	for (i = 0; i < ARRAY_SIZE(available_fw); i++) 
+	{
+		dev_info(&udev->dev, "Looking for: %s\n",available_fw[i].name);
+		
+		rc = request_firmware(&firmware[firmwares + 1],available_fw[i].name, &udev->dev);
 
-		if (rc == 0) {
+		if (rc == 0) 
+		{
 			firmwares++;
 			available_fw[i].found = firmwares;
-			dev_info(&udev->dev, "Found firmware for 0x00%x\n",
-				available_fw[i].id);
-		} else if (rc == -ENOENT) {
+			dev_info(&udev->dev, "Found firmware for 0x00%x\n",available_fw[i].id);
+		} 
+		else if (rc == -ENOENT) 
+		{
 			available_fw[i].found = -1;
-		} else {
-			dev_err(&udev->dev,
-				"request_firmware failed with: %d\n", rc);
+		} 
+		else 
+		{
+			dev_err(&udev->dev,"request_firmware failed with: %d\n", rc);
 			goto err_out;
 		}
 	}
 
-	if (firmwares < 0) {
-		dev_err(&udev->dev,
-			"could not find any firmware for this device\n");
+	if (firmwares < 0) 
+	{
+		dev_err(&udev->dev,"could not find any firmware for this device\n");
 		goto no_dev;
-	} else if (firmwares == 0) {
+	} 
+	else if (firmwares == 0) 
+	{
+		dev_err(&udev->dev,"only one firmware found, defaulting to that\n");
 		rc = smi2021_load_firmware(udev, firmware[0]);
 		if (rc < 0)
 			goto err_out;
-	} else {
+	} 
+	else 
+	{
 		smi2021_choose_firmware(udev);
 	}
 
