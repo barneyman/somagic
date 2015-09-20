@@ -16,18 +16,45 @@ and also have a bash at using the GPU encoder
 
 This is my first leap into linux coding, so, excuse any blatant errors
 
+[(please refer to https://www.raspberrypi.org/documentation/linux/kernel/building.md 
+for help on getting source/building the kernel)
+
+the basic steps for building the kernel are 
+1. get the code!
+2. get the toolset
+3. configure what/how it's built ( *_defconfig)
+4. build kernel
+5. build modules
+6. install them
+]
+
+
 to get this compiling, two choices
 
-a. to Compile this module only
+A. to Compile this module only
+
 1. get your linux source
-2. cd /linux/drivers/media/usb
+2. cd linux/drivers/media/usb
 3. git clone https://github.com/barneyman/somagic.git
-4. make M=drivers/media/usb/somagic modules
+4. go back to your linux directory
+5. make M=drivers/media/usb/somagic modules modules_install
 
 b. to add to your kernel build
-1, 2 & 3 from above
-4. edit Kconfig and Makefile in drivers/media/usb to refer to somagic
-5. make menuconfig (in linux dir), add SMI2021 module
+1 as above
+2 as above
+3 as above
+4. edit Kconfig, add the following line in the MEDIA_ANALOG_TV_SUPPORT block 
+	source "drivers/media/usb/somagic/Kconfig"
+5. edit Makefile, add the following in block of similar commands
+	obj-$(CONFIG_VIDEO_SMI2021) += somagic/
+6. go back to your linux directory
+7. make menuconfig 
+	add SMI2021 module (in device drivers/multimedia support/Media SUB Adaptors/Somagic)
+8. build your kernel and modules
+	make 
+	make modules
+	make modules_install
+	(and copy the img over)
 
  
 
