@@ -39,11 +39,12 @@ A. to Compile this module only
 4. go back to your linux directory
 5. make M=drivers/media/usb/somagic modules modules_install
 
-b. to add to your kernel build
+B. to add to your kernel build
+
 1 as above
 2 as above
 3 as above
-4. edit Kconfig, add the following line in the MEDIA_ANALOG_TV_SUPPORT block 
+4. edit Kconfig, add the following line in the MEDIA_ANALOG_TV_SUPPORT block
 	source "drivers/media/usb/somagic/Kconfig"
 5. edit Makefile, add the following in block of similar commands
 	obj-$(CONFIG_VIDEO_SMI2021) += somagic/
@@ -51,7 +52,7 @@ b. to add to your kernel build
 7. make menuconfig 
 	add SMI2021 module (in device drivers/multimedia support/Media SUB Adaptors/Somagic)
 8. build your kernel and modules
-	make 
+	make
 	make modules
 	make modules_install
 	(and copy the img over)
