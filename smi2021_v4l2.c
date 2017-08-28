@@ -201,7 +201,8 @@ static void buffer_queue(struct vb2_buffer *vb)
 {
 	unsigned long flags;
 	struct smi2021 *smi2021 = vb2_get_drv_priv(vb->vb2_queue);
-	struct smi2021_buf *buf = container_of(vb, struct smi2021_buf, vb);
+	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
+	struct smi2021_buf *buf = container_of(vbuf, struct smi2021_buf, vbv4l2);
 
 
 	if (smi2021->udev == NULL) 
@@ -219,7 +220,7 @@ static void buffer_queue(struct vb2_buffer *vb)
 	if (buf->length < smi2021->currentFrameHeight * SMI2021_BYTES_PER_LINE)
 	{
 		dev_warn(smi2021->dev, "done\n");
-		vb2_buffer_done(&buf->vb, VB2_BUF_STATE_ERROR);
+		vb2_buffer_done(vb, VB2_BUF_STATE_ERROR);
 	}
 	else
 	{

@@ -41,7 +41,7 @@
 #include <media/v4l2-ctrls.h>
 #include <media/videobuf2-core.h>
 #include <media/videobuf2-vmalloc.h>
-#include <media/saa7115.h>
+#include <media/i2c/saa7115.h>
 
 #include <sound/core.h>
 #include <sound/pcm.h>
@@ -107,7 +107,7 @@ struct smi2021_set_hw_state {
 /* A single videobuf2 frame buffer */
 struct smi2021_buf {
 	/* Common vb2 stuff, must be first */
-	struct vb2_buffer		vb;
+	struct vb2_v4l2_buffer 		vbv4l2;
 	struct list_head		list;
 
 	void				*mem;

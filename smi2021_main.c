@@ -378,12 +378,15 @@ static void smi2021_buf_done(struct smi2021 *smi2021)
 	if (buf)
 	{
 
-		v4l2_get_timestamp(&buf->vb.v4l2_buf.timestamp);
-		buf->vb.v4l2_buf.sequence = smi2021->sequence++;
-		buf->vb.v4l2_buf.field = V4L2_FIELD_INTERLACED;
+		struct vb2_v4l2_buffer *vbuf=&(buf->vbv4l2);
 
-		vb2_set_plane_payload(&buf->vb, 0, SMI2021_BYTES_PER_LINE* smi2021->currentFrameHeight);
-		vb2_buffer_done(&buf->vb, VB2_BUF_STATE_DONE);
+//		v4l2_get_timestamp(&vbuf->timecode);
+		v4l2_get_timestamp(&vbuf->vb2_buf.timestamp);
+		vbuf->sequence = smi2021->sequence++;
+		vbuf->field = V4L2_FIELD_INTERLACED;
+
+		vb2_set_plane_payload(&vbuf->vb2_buf, 0, SMI2021_BYTES_PER_LINE* smi2021->currentFrameHeight);
+		vb2_buffer_done(&vbuf->vb2_buf, VB2_BUF_STATE_DONE);
 
 		smi2021->cur_buf = NULL;
 	}
@@ -1161,7 +1164,7 @@ void smi2021_stop(struct smi2021 *smi2021)
 	while (!list_empty(&smi2021->bufs)) 
 	{
 		struct smi2021_buf *buf = list_first_entry(&smi2021->bufs,struct smi2021_buf, list);
-		vb2_buffer_done(&buf->vb, VB2_BUF_STATE_ERROR);
+		vb2_buffer_done(&buf->vbv4l2.vb2_buf, VB2_BUF_STATE_ERROR);
 		list_del(&buf->list);
 	}
 	spin_unlock_irqrestore(&smi2021->buf_lock, flags);
