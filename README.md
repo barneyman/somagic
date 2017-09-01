@@ -17,16 +17,16 @@ and also have a bash at using the GPU encoder
 This is my first leap into linux coding, so, excuse any blatant errors
 
 [(please refer to https://www.raspberrypi.org/documentation/linux/kernel/building.md 
-for help on getting source/building the kernel)
+for help on getting source/building the kernel)]
 
 the basic steps for building the kernel are 
 1. get the code!
 2. get the toolset
-3. configure what/how it's built ( *_defconfig)
+3. configure what/how it's built ( _defconfig)
 4. build kernel
 5. build modules
 6. install them
-]
+
 
 
 to get this compiling, two choices
@@ -48,12 +48,12 @@ B. to add to your kernel build
 5. edit Makefile, add the following in block of similar commands `obj-$(CONFIG_VIDEO_SMI2021) += somagic/`
 6. go back to your linux directory
 7. make menuconfig 
---1. add SMI2021 module (in device drivers/multimedia support/Media USB Adaptors/Somagic)
+   1. add SMI2021 module (in device drivers/multimedia support/Media USB Adaptors/Somagic)
 8. build your kernel and modules
---1. make
---2. make modules
---3. make modules_install
---4. (and copy the img over)
+   1. make
+   2. make modules
+   3. make modules_install
+   4. (and copy the img over)
 
  
 
